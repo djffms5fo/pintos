@@ -11,9 +11,16 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed_point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+
+#define NICE_DEFAULT 0         /* Default value of nice */
+#define RECENT_CPU_DEFAULT 0   /* Default value of recent_cpu */
+#define LOAD_AVG_DEFAULT 0     /* Default value of load_avg */
+
+int load_avg;                  /* Avarage number of process at recent 1 minute */
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -113,6 +120,7 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+  load_avg = LOAD_AVG_DEFAULT;
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -467,6 +475,7 @@ void refresh_priority(void){
 void
 thread_set_priority (int new_priority) 
 {
+  if(thread_mlfqs) return;
   if(thread_current()->priority == thread_current()->init_priority)
     thread_current()->priority = new_priority;
   thread_current()->init_priority = new_priority;
@@ -486,32 +495,73 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  enum intr_level old_level;
+  old_level = intr_disable();
+
+  struct thread* cur = thread_current();
+  cur->nice = nice;
+  mlfqs_priority(cur,NULL);
+  test_max_priority();
+  
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_to_int_round(mult_mixed(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
 }
+
+void mlfqs_priority (struct thread *t, void *aux){
+  if(t == idle_thread) return;
+  t->priority = (PRI_MAX - t->nice * 2) -
+                 fp_to_int_round(div_mixed(t->recent_cpu, 4));
+  if(t->priority > PRI_MAX)
+    t->priority = PRI_MAX;
+  if(t->priority < PRI_MIN)
+    t->priority = PRI_MIN;
+}
+
+void mlfqs_recent_cpu (struct thread *t, void *aux){
+  if(t == idle_thread) return;
+  t->recent_cpu = add_mixed(mult_fp(div_fp(mult_mixed(load_avg, 2),
+            add_mixed(mult_mixed(load_avg, 2), 1)),
+                    t->recent_cpu), t->nice);
+}
+
+void mlfqs_load_avg (void){
+  int ready_threads = list_size(&ready_list);
+  if(thread_current() != idle_thread) ready_threads++;
+  load_avg = add_fp(mult_fp(div_mixed(int_to_fp(59), 60), load_avg),
+                    mult_mixed(div_mixed(int_to_fp(1), 60),ready_threads));
+  if(load_avg < 0) load_avg = 0;   
+}
+
+void mlfqs_increment (void){
+  if(thread_current() == idle_thread) return;
+  thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu, 1);
+}
+
+void mlfqs_recalc (void){
+  thread_foreach(mlfqs_priority, NULL);
+  thread_foreach(mlfqs_recent_cpu, NULL);
+}
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
    The idle thread is initially put on the ready list by
@@ -597,6 +647,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->init_priority = priority;
   t->wait_on_lock = NULL;
+  t->nice = NICE_DEFAULT;
+  t->recent_cpu = RECENT_CPU_DEFAULT;
   list_init(&t->donations);
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);

@@ -172,12 +172,15 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  /* code to add: 
-	check sleep list and the global tick.
-	find any threads to wake up,
-	move them to the ready list if necessary.
-	update the global tick.
-	*/
+  if(thread_mlfqs){
+    mlfqs_increment();
+    if(ticks % 100 == 0){
+      mlfqs_load_avg();
+      mlfqs_recalc();
+    }
+    if(ticks % 4 == 0)
+      mlfqs_priority(thread_current(), NULL);
+  }
   if(get_mintick() <= ticks)
     thread_wakeup(ticks);
 }
