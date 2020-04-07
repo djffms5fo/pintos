@@ -19,9 +19,6 @@ void sema_self_test (void);
 
 bool cmp_sem_priority (const struct list_elem *a,
                        const struct list_elem *b, void *aux);
-                       
-bool cmp_cond_priority (const struct list_elem *a,
-                        const struct list_elem *b, void *aux);
 
 
 /* Lock. */
@@ -29,6 +26,8 @@ struct lock
   {
     struct thread *holder;      /* Thread holding lock (for debugging). */
     struct semaphore semaphore; /* Binary semaphore controlling access. */
+    struct list_elem lock_elem;
+    int priority;
   };
 
 void lock_init (struct lock *);
