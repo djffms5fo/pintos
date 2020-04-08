@@ -260,6 +260,7 @@ struct semaphore_elem
     struct semaphore semaphore;         /* This semaphore. */
   };
 
+/* Compare priority. Used for sorting and semaphore_elem version. */
 bool cmp_sem_priority (const struct list_elem *a, const struct
 list_elem *b, void *aux UNUSED){
   struct semaphore_elem* sa = list_entry(a, struct semaphore_elem, elem);

@@ -20,7 +20,7 @@
 #define RECENT_CPU_DEFAULT 0   /* Default value of recent_cpu */
 #define LOAD_AVG_DEFAULT 0     /* Default value of load_avg */
 
-int load_avg;                  /* Avarage number of process at recent 1 minute */
+int load_avg;              /* Avarage number of process at recent 1 minute */
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -39,6 +39,7 @@ static struct list all_list;
    they are sleep and removed when they run*/
 static struct list sleep_list;
 
+/* Mininum value of ticks that waiting for wake up */
 int64_t mintick;
 
 /* Idle thread. */
@@ -349,11 +350,13 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+/* Update next wake up ticks */
 void set_mintick(int64_t tick){
   if(tick < mintick)
     mintick = tick;
 }
 
+/* Get next wake up ticks */
 int64_t get_mintick(void){
   return mintick;
 }
@@ -366,7 +369,6 @@ void thread_sleep(int64_t ticks){
 	store the local tick to wake up,
 	update the global tick if necessary,
 	and call schedule() */
-  /* When you manipulate thread list, disable interrupt! */
 
   enum intr_level old_level;
   old_level = intr_disable();
@@ -382,12 +384,13 @@ void thread_sleep(int64_t ticks){
   intr_set_level(old_level);
 }
 
-/*Wake up all threads that localtick < mintick*/
+/* Wake up all threads that localtick < mintick */
 void thread_wakeup(int64_t tick){
   mintick = INT64_MAX;
   struct list_elem* temp;
   struct list_elem* next;
   if(!list_empty(&sleep_list)){
+    /* Find thread that have to wake up */
     for(temp = list_front(&sleep_list); temp != list_end(&sleep_list);
         temp = next){
       struct thread *trd = list_entry (temp, struct thread, elem);
@@ -403,6 +406,7 @@ void thread_wakeup(int64_t tick){
   }
 }
 
+/* Yield CPU for higher priority thread */
 void test_max_priority(void){
   if(!list_empty(&ready_list))
     if(list_entry(list_front(&ready_list), struct thread, elem)->priority>
@@ -410,12 +414,14 @@ void test_max_priority(void){
       thread_yield();
 }
 
+/* Compare priority. Used for sorting */
 bool cmp_priority(const struct list_elem* a,
                   const struct list_elem* b, void* aux UNUSED){
   return list_entry(a, struct thread, elem)->priority >
          list_entry(b, struct thread, elem)->priority;
 }
 
+/* Same as above. Donation_elem version. */
 bool cmp_lock_priority(const struct list_elem* a,
                   const struct list_elem* b, void* aux UNUSED){
   struct thread* ta = list_entry(a, struct thread, donation_elem);
@@ -426,7 +432,8 @@ bool cmp_lock_priority(const struct list_elem* a,
   return ta->priority > tb->priority;
 }
 
-
+/* Donate priority to lock holder. If lock holder is waiting for 
+   another lock, check donation is needed. Nested donation depth is 8. */
 void donate_priority(void){
   struct thread* cur = thread_current();
   struct lock* lock = cur->wait_on_lock;
@@ -440,6 +447,8 @@ void donate_priority(void){
   }
 }
 
+/* Find the thread that we have to remove from donation list with lock.
+   And then remove it. */
 void remove_with_lock(struct lock* lock){
   struct thread* hol = lock->holder;
   if (hol == NULL)
@@ -456,6 +465,8 @@ void remove_with_lock(struct lock* lock){
   }
 }
 
+/* After priority change or lock release, reset priority and find greater
+   priority that thread have. */
 void refresh_priority(void){
   struct thread* cur= thread_current();
   cur ->priority = cur->init_priority;
@@ -527,6 +538,8 @@ thread_get_recent_cpu (void)
   return fp_to_int_round(mult_mixed(thread_current()->recent_cpu, 100));
 }
 
+/* Compute priority with recent_cpu and nice.
+   If priority exceed range, it is boundary point. */
 void mlfqs_priority (struct thread *t, void *aux){
   if(t == idle_thread) return;
   t->priority = (PRI_MAX - t->nice * 2) -
@@ -537,6 +550,7 @@ void mlfqs_priority (struct thread *t, void *aux){
     t->priority = PRI_MIN;
 }
 
+/* Compute recent_cpu with load_avg. */
 void mlfqs_recent_cpu (struct thread *t, void *aux){
   if(t == idle_thread) return;
   t->recent_cpu = add_mixed(mult_fp(div_fp(mult_mixed(load_avg, 2),
@@ -544,6 +558,7 @@ void mlfqs_recent_cpu (struct thread *t, void *aux){
                     t->recent_cpu), t->nice);
 }
 
+/* Compute load_avg with ready_threads and itself*/
 void mlfqs_load_avg (void){
   int ready_threads = list_size(&ready_list);
   if(thread_current() != idle_thread) ready_threads++;
@@ -552,11 +567,13 @@ void mlfqs_load_avg (void){
   if(load_avg < 0) load_avg = 0;   
 }
 
+/* Increase recent_cpu 1. */
 void mlfqs_increment (void){
   if(thread_current() == idle_thread) return;
   thread_current()->recent_cpu = add_mixed(thread_current()->recent_cpu, 1);
 }
 
+/* Recalculate all threads' recent_cpu and priority */
 void mlfqs_recalc (void){
   thread_foreach(mlfqs_priority, NULL);
   thread_foreach(mlfqs_recent_cpu, NULL);
